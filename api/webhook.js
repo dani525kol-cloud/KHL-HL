@@ -92,7 +92,6 @@ function isDateHeaderRow(r) {
   const ed = (r[COL.EDITOR] || '').trim();
   const m  = (r[COL.MATCH]  || '').toString().trim().toLowerCase();
   const looksLikeDate = /^(\d{1,2})\s+[а-яё]+/.test(m); // "13 октября ..."
-  // это заголовок, если похоже на дату и при этом нет времени/монтажера
   return looksLikeDate && !t && !ed;
 }
 
@@ -129,10 +128,22 @@ function extractDateDDMMYYYY(s) {
 /* ===== ГРУППИРОВКА ПО ДАТАМ ===== */
 function groupByDate(rows) {
   const map = new Map();
+  let currentDate = null; // дата из последней шапки
+
   for (const r of rows) {
-    if (isDateHeaderRow(r)) continue;        // ← добавили
-    const ds = extractDateDDMMYYYY(r[COL.MATCH]);
-    if (!ds) continue;
+    // если это шапка даты — запоминаем и идём дальше
+    if (isDateHeaderRow(r)) {
+      currentDate = extractDateDDMMYYYY(r[COL.MATCH]) || currentDate;
+      continue;
+    }
+
+    // пробуем достать дату прямо из ячейки (на случай, если она там есть)
+    let ds = extractDateDDMMYYYY(r[COL.MATCH]);
+
+    // если даты в строке нет — используем дату из последней шапки
+    if (!ds) ds = currentDate;
+    if (!ds) continue; // всё ещё нет даты — пропускаем
+
     if (!map.has(ds)) map.set(ds, []);
     map.get(ds).push(r);
   }
