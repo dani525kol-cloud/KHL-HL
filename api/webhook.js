@@ -86,6 +86,16 @@ function csvParseSmart(text) {
   return rows;
 }
 
+/* ===== ФИЛЬТР: ПРОПУСКАЕМ ЗАГОЛОВКИ ДАТ ===== */
+function isDateHeaderRow(r) {
+  const t  = (r[COL.TIME]   || '').trim();
+  const ed = (r[COL.EDITOR] || '').trim();
+  const m  = (r[COL.MATCH]  || '').toString().trim().toLowerCase();
+  const looksLikeDate = /^(\d{1,2})\s+[а-яё]+/.test(m); // "13 октября ..."
+  // это заголовок, если похоже на дату и при этом нет времени/монтажера
+  return looksLikeDate && !t && !ed;
+}
+
 /* ===== Разбор даты из первого столбца ===== */
 function extractDateDDMMYYYY(s) {
   s = (s || '').toString().trim();
@@ -120,6 +130,7 @@ function extractDateDDMMYYYY(s) {
 function groupByDate(rows) {
   const map = new Map();
   for (const r of rows) {
+    if (isDateHeaderRow(r)) continue;        // ← добавили
     const ds = extractDateDDMMYYYY(r[COL.MATCH]);
     if (!ds) continue;
     if (!map.has(ds)) map.set(ds, []);
@@ -130,12 +141,15 @@ function groupByDate(rows) {
 
 /* ===== ФОРМАТ ОТВЕТА ===== */
 function formatLine(r) {
-  const time   = r[COL.TIME]   || '';
-  const match  = r[COL.MATCH]  || '';
-  const edRaw  = r[COL.EDITOR] || '';
+  const time   = (r[COL.TIME]   || '').trim();
+  const edRaw  = (r[COL.EDITOR] || '').trim();
+  let   match  = (r[COL.MATCH]  || '').toString().trim();
+
+  // если в поле "матч" почему-то лежит снова «13 октября ...», не показываем
+  if (/^(\d{1,2})\s+[а-яё]+/i.test(match)) match = '';
+
   const editor = /колышев/i.test(edRaw) ? '✅Колышев✅' : edRaw;
-  // Пример: "16:30 ✅Колышев✅ Авангард - Адмирал"
-  return `${time ? `${time} ` : ''}${editor ? `${editor} ` : ''}${match}`.trim();
+  return `${time ? time+' ' : ''}${editor ? editor+' ' : ''}${match}`.trim();
 }
 
 function renderDayCaption(dateStr, isToday=false) {
