@@ -1,27 +1,29 @@
-// Не парсим тело автоматически — читаем сами
-module.exports.config = { api: { bodyParser: false } };
+// api/webhook.js
+
+// ——— выключаем автопарс тела, будем читать сами
+export const config = { api: { bodyParser: false } };
 
 /* ===== НАСТРОЙКИ ===== */
 const TELEGRAM_TOKEN = 'ВАШ_ТОКЕН_ТГ_БОТА';
 const TZ = 'Europe/Moscow';
 
-// CSV по месяцам (потом просто добавляй новые)
+// CSV по месяцам (добавляй новые по мере надобности)
 const MONTH_URLS = {
-  10: 'https://.../october.csv', // Октябрь
+  10: 'https://.../october.csv',  // Октябрь
   11: 'https://.../november.csv', // Ноябрь
-  // 12: '...'
+  // 12: 'https://.../december.csv',
 };
 
-// Индексы колонок (0-based) в CSV: см. скрин
+// Индексы колонок (0-based) в CSV
 const COL = {
-  MATCH: 0,        // "МАТЧ"
-  TIME: 1,         // "ВРЕМЯ"
-  EDITOR: 2,       // "МОНТАЖЕР"
-  LINK_READY: 3,   // "Ссылка на готовый хайлайт (на диске)"
-  LINK_YT: 4       // "YOUTUBE КХЛ"
+  MATCH: 0,       // "МАТЧ"
+  TIME: 1,        // "ВРЕМЯ"
+  EDITOR: 2,      // "МОНТАЖЕР"
+  LINK_READY: 3,  // "Ссылка на готовый хайлайт (на диске)"
+  LINK_YT: 4      // "YOUTUBE КХЛ"
 };
 
-/* ====== ТГ API ====== */
+/* ===== ТГ API ===== */
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const menu = () => ({
   inline_keyboard: [[
@@ -30,21 +32,27 @@ const menu = () => ({
   ]]
 });
 
-/* ====== ДАТЫ ====== */
+async function answerCallbackQuery(id) {
+  if (!id) return;
+  try {
+    await fetch(`${TG_API}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callback_query_id: id })
+    });
+  } catch {}
+}
+
+/* ===== ДАТЫ ===== */
 function dfmt(d) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric' })
     .format(d).replace(/\//g,'.'); // dd.MM.yyyy
 }
 function todayPlus(days=0) {
   const d = new Date();
-  d.setHours(12,0,0,0); // чтобы не прыгало
+  d.setHours(12,0,0,0); // чтобы не прыгало по TZ
   d.setDate(d.getDate()+days);
   return d;
-}
-function withTZDateOnly(ds) {
-  // строка dd.MM.yyyy -> Date по TZ
-  const [dd, mm, yyyy] = ds.split('.');
-  return new Date(Date.UTC(+yyyy, +mm-1, +dd, 12, 0, 0)); // «полдень» UTC — нормально сравнивать по календарю
 }
 
 /* ===== CSV ===== */
@@ -68,15 +76,15 @@ function csvParse(text) {
   });
 }
 
-/* ===== ССЫЛКА ДЛЯ ДАТЫ ===== */
+/* ===== URL CSV для даты ===== */
 function getCsvUrlForDate(d) {
   const month = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, month:'numeric' }).format(d);
   const m = parseInt(month,10);
   return MONTH_URLS[m] || null;
 }
 
-/* ===== ПАРСИНГ ДАТЫ ИЗ ПЕРВОГО СТОЛБЦА =====
-   Поддержка «1 октября (среда)», «01.10.2025», «1 октября» и т.п.   */
+/* ===== выцепляем дату из столбца МАТЧ =====
+   Поддержка «1 октября (среда)», «01.10.2025», «1 октября» и т.п. */
 function extractDateDDMMYYYY(s) {
   s = (s||'').trim();
 
@@ -100,7 +108,7 @@ function extractDateDDMMYYYY(s) {
   return null;
 }
 
-/* ===== ГРУППИРОВКА ПО ДАТАМ ===== */
+/* ===== группировка CSV по дате ===== */
 function groupByDate(rows) {
   const map = new Map();
   for (const r of rows) {
@@ -112,7 +120,7 @@ function groupByDate(rows) {
   return map;
 }
 
-/* ===== ФОРМАТ ОТВЕТА ===== */
+/* ===== формат строк ===== */
 function formatLine(r) {
   const time  = r[COL.TIME]   || '';
   const match = r[COL.MATCH]  || '';
@@ -133,7 +141,7 @@ function renderDayBlock(dateStr, rows, isToday=false) {
   return `${renderDayCaption(dateStr, isToday)}\n${lines.join('\n')}`;
 }
 
-/* ===== ТЕЛЕГРАМ I/O ===== */
+/* ===== ТГ отправка ===== */
 async function sendMessage(chatId, text, markup) {
   const payload = { chat_id: chatId, text: text || ' ', disable_web_page_preview: true };
   if (markup) payload.reply_markup = markup;
@@ -142,63 +150,68 @@ async function sendMessage(chatId, text, markup) {
   });
 }
 
+/* ===== основной обработчик "N дней" ===== */
 async function handleDays(chatId, days) {
-  // собираем даты, учитывая переход месяца
   const targets = [];
   for (let i=0; i<days; i++) targets.push(todayPlus(i));
-  // нужна коллекция URL по месяцам, которые задействованы
-  const byMonth = new Map(); // month -> rows[]
+
+  // уникальные месяцы → грузим CSV по одному разу
+  const byMonth = new Map(); // url -> rows[]
   for (const d of targets) {
     const url = getCsvUrlForDate(d);
-    if (!url) continue;
-    byMonth.set(url, null);
+    if (url) byMonth.set(url, null);
   }
-  // грузим CSV по каждому месяцу ровно 1 раз
-  for (const url of [...byMonth.keys()]) {
+  for (const url of byMonth.keys()) {
     try {
       const text = await fetchCsv(url);
       const rows = csvParse(text).slice(1); // срезаем хедер
       byMonth.set(url, rows);
     } catch {
-      byMonth.set(url, []); // чтобы не падать
+      byMonth.set(url, []);
     }
   }
-  // строим карту дата->строки
-  const allMap = new Map(); // dd.MM.yyyy -> rows[]
+
+  // дата -> строки
+  const allMap = new Map();
   for (const d of targets) {
     const ds = dfmt(d);
-    allMap.set(ds, []);
     const url = getCsvUrlForDate(d);
     const rows = byMonth.get(url) || [];
     const grouped = groupByDate(rows);
-    const hit = grouped.get(ds) || [];
-    allMap.set(ds, hit);
+    allMap.set(ds, grouped.get(ds) || []);
   }
+
   // рендер
   const parts = targets.map((d, idx) => {
     const ds = dfmt(d);
     const rows = allMap.get(ds);
-    return renderDayBlock(ds, rows, idx===0); // первый блок = «сегодня»
+    return renderDayBlock(ds, rows, idx===0);
   });
+
   await sendMessage(chatId, parts.join('\n\n'), menu());
 }
 
-/* ====== ВЕРСЕЛ-ХЕНДЛЕР ====== */
+/* ===== чтение raw body ===== */
 async function readRaw(req) {
   if (req.body) return req.body;
   const chunks = []; for await (const ch of req) chunks.push(ch);
   try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { return {}; }
 }
 
-module.exports = async (req, res) => {
+/* ===== ВЕРСЕЛ-ХЕНДЛЕР ===== */
+export default async function handler(req, res) {
+  // быстрый тест в браузере
+  if (req.method === 'GET') return res.status(200).send('alive');
+
   const body = await readRaw(req);
   try {
     if (body.callback_query) {
       const cq = body.callback_query;
       const chatId = cq?.message?.chat?.id;
       const data = cq?.data;
+      await answerCallbackQuery(cq?.id); // чтобы не висела «крутилка»
       if (chatId && data) {
-        if (data === 'today')  await handleDays(chatId, 1);
+        if (data === 'today') await handleDays(chatId, 1);
         else if (data === '3days') await handleDays(chatId, 3);
       }
     } else if (body.message) {
@@ -215,6 +228,9 @@ module.exports = async (req, res) => {
         await sendMessage(chatId, 'Команды: /today, /3days', menu());
       }
     }
-  } catch {}
+  } catch (e) {
+    // можно логировать в console.error — увидишь в Runtime Logs
+    console.error(e);
+  }
   res.status(200).send('ok');
-};
+}
