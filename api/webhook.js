@@ -7,7 +7,7 @@ const TZ = 'Europe/Moscow';
 
 // Поставь РЕАЛЬНЫЕ публичные CSV-ссылки (должны открываться в инкогнито)
 const MONTH_URLS = {
-  10: 'https://disk.yandex.ru/d/7dnSP_6Tp1aE7Q',
+  10: 'https://raw.githubusercontent.com/dani525kol-cloud/KHL-HL/refs/heads/main/Октябрь.csv',
   11: 'https://<твой-публичный-url-на-CSV-ноября>',
   // 12: 'https://...'
 };
