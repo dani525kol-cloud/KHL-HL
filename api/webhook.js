@@ -150,16 +150,51 @@ function groupByDate(rows) {
   return map;
 }
 
+function fmtTime(val) {
+  if (val == null) return '';
+  let s = String(val).trim();
+
+  // если уже "HH:MM" — отдать как есть
+  if (/^\d{1,2}:\d{2}$/.test(s)) return s;
+
+  // заменить запятую на точку (иногда CSV так делает)
+  s = s.replace(',', '.');
+
+  const num = Number(s);
+  if (Number.isFinite(num)) {
+    // классический Excel/Яндекс: доля суток
+    if (num >= 0 && num <= 1) {
+      const totalMin = Math.round(num * 24 * 60);
+      const hh = Math.floor(totalMin / 60);
+      const mm = totalMin % 60;
+      return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+    }
+    // на крайний случай: пришло количество минут целым числом
+    if (num > 1 && num < 1440) {
+      const hh = Math.floor(num / 60);
+      const mm = Math.round(num % 60);
+      return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+    }
+    // форматы типа 930 / 1930 → 09:30 / 19:30
+    if (/^\d{3,4}$/.test(s)) {
+      const hh = Math.floor(num / 100);
+      const mm = num % 100;
+      return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+    }
+  }
+  return s; // оставить как есть, если ничего не подошло
+}
+
 /* ===== ФОРМАТ ОТВЕТА ===== */
 function formatLine(r) {
-  const time   = (r[COL.TIME]   || '').trim();
-  const edRaw  = (r[COL.EDITOR] || '').trim();
-  let   match  = (r[COL.MATCH]  || '').toString().trim();
-
-  // если в поле "матч" почему-то лежит снова «13 октября ...», не показываем
-  if (/^(\d{1,2})\s+[а-яё]+/i.test(match)) match = '';
-
+  const time   = fmtTime(r[COL.TIME]);           // ← вот здесь
+  const match  = (r[COL.MATCH]  || '').toString().trim();
+  const edRaw  = (r[COL.EDITOR] || '').toString().trim();
   const editor = /колышев/i.test(edRaw) ? '✅Колышев✅' : edRaw;
+
+  // защита от случайной «даты» в поле матча
+  if (/^(\d{1,2})\s+[а-яё]+/i.test(match)) return '';
+
   return `${time ? time+' ' : ''}${editor ? editor+' ' : ''}${match}`.trim();
 }
 
