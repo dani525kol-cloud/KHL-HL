@@ -3,8 +3,8 @@
 // ——— выключаем автопарс тела, будем читать сами
 export const config = { api: { bodyParser: false } };
 
-/* ===== НАСТРОЙКИ ===== */
-const TELEGRAM_TOKEN = 'ВАШ_ТОКЕН_ТГ_БОТА';
+// ==== НАСТРОЙКИ ====
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || 'ВАШ_ТОКЕН_ТГ_БОТА'; // <-- лучше через env
 const TZ = 'Europe/Moscow';
 
 // CSV по месяцам (добавляй новые по мере надобности)
@@ -145,9 +145,33 @@ function renderDayBlock(dateStr, rows, isToday=false) {
 async function sendMessage(chatId, text, markup) {
   const payload = { chat_id: chatId, text: text || ' ', disable_web_page_preview: true };
   if (markup) payload.reply_markup = markup;
-  await fetch(`${TG_API}/sendMessage`, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
-  });
+
+  try {
+    const resp = await fetch(`${TG_API}/sendMessage`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const body = await resp.text();
+    console.log('sendMessage', resp.status, body);
+  } catch (e) {
+    console.error('sendMessage ERROR', e);
+  }
+}
+
+async function answerCallbackQuery(id) {
+  if (!id) return;
+  try {
+    const resp = await fetch(`${TG_API}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ callback_query_id: id })
+    });
+    const body = await resp.text();
+    console.log('answerCallbackQuery', resp.status, body);
+  } catch (e) {
+    console.error('answerCallbackQuery ERROR', e);
+  }
 }
 
 /* ===== основной обработчик "N дней" ===== */
@@ -197,11 +221,29 @@ async function readRaw(req) {
   const chunks = []; for await (const ch of req) chunks.push(ch);
   try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { return {}; }
 }
+const body = await readRaw(req);
+try {
+  console.log('update_type=',
+    body?.callback_query ? 'callback_query' :
+    body?.message ? 'message' : 'unknown'
+  );
 
 /* ===== ВЕРСЕЛ-ХЕНДЛЕР ===== */
 export default async function handler(req, res) {
   // быстрый тест в браузере
   if (req.method === 'GET') return res.status(200).send('alive');
+
+  export default async function handler(req, res) {
+  if (req.method === 'GET') {
+    const testChat = req.query?.test;
+    if (testChat) {
+      await sendMessage(testChat, '✅ Vercel → Telegram работает');
+      return res.status(200).send('test sent');
+    }
+    return res.status(200).send('alive');
+  }
+  // ... остальной код
+}
 
   const body = await readRaw(req);
   try {
